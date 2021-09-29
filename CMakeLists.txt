@@ -11,13 +11,10 @@ project(ctc_release)
 include_directories(include)
 
 FIND_PACKAGE(CUDA 6.5)
-FIND_PACKAGE(Torch)
 
 MESSAGE(STATUS "cuda found ${CUDA_FOUND}")
-MESSAGE(STATUS "Torch found ${Torch_DIR}")
 
 option(WITH_GPU     "compile warp-ctc with CUDA."     ${CUDA_FOUND})
-option(WITH_TORCH   "compile warp-ctc with Torch."    ${Torch_FOUND})
 option(WITH_OMP     "compile warp-ctc with OpenMP."   ON)
 option(BUILD_TESTS  "build warp-ctc unit tests."      ON)
 option(BUILD_SHARED "build warp-ctc shared library."  ON)
@@ -138,59 +135,26 @@ function(windows_symbolic TARGET)
     endforeach()
 endfunction()
 
-IF (WITH_GPU OR WITH_ROCM)
-
+IF (WITH_GPU)
     MESSAGE(STATUS "Building shared library with GPU support")
+    MESSAGE(STATUS "NVCC_ARCH_FLAGS" ${CUDA_NVCC_FLAGS})
+    CUDA_ADD_LIBRARY(warpctc ${WARPCTC_SHARED} src/ctc_entrypoint.cu src/reduce.cu)
+    
+    MESSAGE(STATUS "Building shared library with GPU support")
+    set(CUDA_curand_LIBRARY "/usr/local/cuda/lib64/libcurand.so.10")
 
-    IF (WITH_GPU)
-        MESSAGE(STATUS "NVCC_ARCH_FLAGS" ${CUDA_NVCC_FLAGS})
-    ENDIF()
-
-    if (WIN32)
-        SET(CUDA_NVCC_FLAGS "${CUDA_NVCC_FLAGS} -Xcompiler \"/wd 4068 /wd 4244 /wd 4267 /wd 4305 /wd 4819\"")
-        windows_symbolic(ctc_entrypoint SRCS ctc_entrypoint.cu PATH src)
-        CUDA_ADD_LIBRARY(warpctc ${WARPCTC_SHARED} src/.ctc_entrypoint.cu src/reduce.cu)
-    else()
-        IF (WITH_GPU)
-            CUDA_ADD_LIBRARY(warpctc ${WARPCTC_SHARED} src/ctc_entrypoint.cu src/reduce.cu)
-        ELSE()
-            HIP_ADD_LIBRARY(warpctc ${WARPCTC_SHARED} src/ctc_entrypoint.cu src/reduce.cu)
-            TARGET_LINK_LIBRARIES(warpctc PUBLIC ${ROCM_HIPRTC_LIB})
-        ENDIF()
-    endif(WIN32)
-
-    IF (!WITH_TORCH)
-        MESSAGE(STATUS "Link rand library")
-
-        IF (WITH_GPU)
-            MESSAGE(STATUS "Link cuda rand library: ${CUDA_curand_LIBRARY}")
-            TARGET_LINK_LIBRARIES(warpctc ${CUDA_curand_LIBRARY})
-        ELSE()
-            MESSAGE(STATUS "Link hip rand library: ${hiprand_LIBRARY_DIRS}")
-            TARGET_LINK_LIBRARIES(warpctc ${hiprand_LIBRARY_DIRS}/libhiprand.so)
-        ENDIF()
-    ENDIF()
+    MESSAGE(STATUS "Link cuda rand library: ${CUDA_curand_LIBRARY}")
+    TARGET_LINK_LIBRARIES(warpctc ${CUDA_curand_LIBRARY})
 
     if(BUILD_TESTS)
         MESSAGE(STATUS "Build tests")
-
-        IF (WITH_GPU)
-            add_executable(test_cpu tests/test_cpu.cpp)
-        ELSE()
-            add_executable(test_cpu tests/test_cpu.cpp)
-        ENDIF()
-
+        add_executable(test_cpu tests/test_cpu.cpp)
 
         TARGET_LINK_LIBRARIES(test_cpu warpctc)
         SET_TARGET_PROPERTIES(test_cpu PROPERTIES COMPILE_FLAGS "${CMAKE_CXX_FLAGS} --std=c++11")
 
-        IF (WITH_GPU)
-            cuda_add_executable(test_gpu tests/test_gpu.cu)
-            TARGET_LINK_LIBRARIES(test_gpu warpctc ${CUDA_curand_LIBRARY})
-        ELSE()
-            hip_add_executable(test_gpu tests/test_gpu.cu)
-            TARGET_LINK_LIBRARIES(test_gpu warpctc ${hiprand_LIBRARY_DIRS}/libhiprand.so)
-        ENDIF()
+        cuda_add_executable(test_gpu tests/test_gpu.cu)
+        TARGET_LINK_LIBRARIES(test_gpu warpctc ${CUDA_curand_LIBRARY})
     endif(BUILD_TESTS)
 
     INSTALL(TARGETS warpctc
@@ -199,28 +163,6 @@ IF (WITH_GPU OR WITH_ROCM)
             ARCHIVE DESTINATION "lib")
 
     INSTALL(FILES include/ctc.h DESTINATION "include")
-
-    IF (WITH_TORCH AND WITH_GPU)
-        MESSAGE(STATUS "Building Torch Bindings with GPU support")
-        INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS} "${CUDA_TOOLKIT_ROOT_DIR}/samples/common/inc")
-        INCLUDE_DIRECTORIES(${Torch_INSTALL_INCLUDE} ${Torch_INSTALL_INCLUDE}/TH ${Torch_INSTALL_INCLUDE}/THC)
-
-        TARGET_LINK_LIBRARIES(warpctc luajit luaT THC TH ${CUDA_curand_LIBRARY})
-        INSTALL(TARGETS warpctc
-                RUNTIME DESTINATION "${Torch_INSTALL_BIN_SUBDIR}"
-                LIBRARY DESTINATION "${Torch_INSTALL_LIB_SUBDIR}"
-                ARCHIVE DESTINATION "${Torch_INSTALL_LIB_SUBDIR}")
-
-        SET(src torch_binding/binding.cpp torch_binding/utils.c)
-        SET(luasrc torch_binding/init.lua)
-
-        ADD_TORCH_PACKAGE(warp_ctc "${src}" "${luasrc}")
-        IF (APPLE)
-            TARGET_LINK_LIBRARIES(warp_ctc warpctc luajit luaT THC TH ${CUDA_curand_LIBRARY})
-        ELSE()
-            TARGET_LINK_LIBRARIES(warp_ctc warpctc luajit luaT THC TH ${CUDA_curand_LIBRARY} gomp)
-        ENDIF()
-    ENDIF()
 
 ELSE()
     MESSAGE(STATUS "Building shared library with no GPU support")

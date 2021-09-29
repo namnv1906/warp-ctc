@@ -27,13 +27,6 @@ if "CUDA_HOME" not in os.environ:
 else:
     enable_gpu = True
 
-
-if "TENSORFLOW_SRC_PATH" not in os.environ:
-    print("Please define the TENSORFLOW_SRC_PATH environment variable.\n"
-          "This should be a path to the Tensorflow source directory.",
-          file=sys.stderr)
-    sys.exit(1)
-
 if platform.system() == 'Darwin':
     lib_ext = ".dylib"
 else:
@@ -52,13 +45,11 @@ if not os.path.exists(os.path.join(warp_ctc_path, "libwarpctc"+lib_ext)):
 root_path = os.path.realpath(os.path.dirname(__file__))
 
 tf_include = tf.sysconfig.get_include()
-tf_src_dir = os.environ["TENSORFLOW_SRC_PATH"]
+tf_src_dir = tf.sysconfig.get_lib()
 tf_includes = [tf_include, tf_src_dir]
 warp_ctc_includes = [os.path.join(root_path, '../include')]
 include_dirs = tf_includes + warp_ctc_includes
 
-if tf.__version__ >= '1.4':
-    include_dirs += [tf_include + '/../../external/nsync/public']
 
 if os.getenv("TF_CXX11_ABI") is not None:
     TF_CXX11_ABI = os.getenv("TF_CXX11_ABI")
@@ -79,8 +70,8 @@ extra_compile_args += ['-Wno-return-type']
 
 extra_link_args = []
 if tf.__version__ >= '1.4':
-    if os.path.exists(os.path.join(tf_src_dir, 'libtensorflow_framework.so')):
-        extra_link_args = ['-L' + tf.sysconfig.get_lib(), '-ltensorflow_framework']
+    extra_compile_args += tf.sysconfig.get_compile_flags()
+    extra_link_args += tf.sysconfig.get_link_flags()
 
 if (enable_gpu):
     extra_compile_args += ['-DWARPCTC_ENABLE_GPU']
@@ -119,7 +110,8 @@ ext = setuptools.Extension('warpctc_tensorflow.kernels',
 
 class build_tf_ext(orig_build_ext):
     def build_extensions(self):
-        self.compiler.compiler_so.remove('-Wstrict-prototypes')
+        if tf.__version__ <= "1.4":
+            self.compiler.compiler_so.remove('-Wstrict-prototypes')
         orig_build_ext.build_extensions(self)
 
 def discover_test_suite():
@@ -136,8 +128,8 @@ with open(README_PATH, "r") as handle:
 
 setuptools.setup(
     name = "warpctc_tensorflow",
-    version = "0.1",
-    description = "TensorFlow wrapper for warp-ctc",
+    version = "0.2",
+    description = "TensorFlow 2.0 wrapper for warp-ctc",
     long_description = LONG_DESCRIPTION,
     url = "https://github.com/baidu-research/warp-ctc",
     author = "Jared Casper",
